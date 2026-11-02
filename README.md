@@ -145,7 +145,7 @@ app/src/main/
 
 ---
 
-## 6. Hito 8 — Cómo Ejecutar el Proyecto y Guion de Demostración
+## 6. Hito 8 — Cómo Ejecutar el Proyecto 
 
 ### 6.1 Cómo abrir y compilar el proyecto
 1. Abrir **Android Studio** → **Open** y seleccionar la carpeta `MonitorIoT`.
