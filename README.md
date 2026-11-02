@@ -153,9 +153,4 @@ app/src/main/
 3. En ambos teléfonos Android físicos, activar **Opciones de desarrollador** y **Depuración por USB** (o generar el APK desde **Build → Generate App Bundles or APKs → Generate APKs**, ubicado en `app/build/outputs/apk/debug/app-debug.apk`).
 4. Emparejar ambos teléfonos una vez en **Ajustes → Bluetooth → Vincular nuevo dispositivo** (si se usa Bluetooth) o conectar ambos a la misma red / *hotspot* (si se usa Wi-Fi).
 
-### 6.2 Guion para la Demostración en Clase (5 a 7 minutos)
-1. **Autenticación (Hito 5):** Registrar el primer usuario (`operador`), mostrar un intento fallido de contraseña y explicar el hash `PBKDF2-SHA256` en `Cripto.kt` y el bloqueo de 30 segundos en `PantallaLogin.kt`.
-2. **Conexión (Hito 3):** En el Teléfono A elegir **Nodo IoT (Perímetro)** y en el Teléfono B elegir **Panel de Control**, ambos con el mismo código de 6 dígitos (`123456`). Explicar por qué se eligió Bluetooth Clásico y cómo `WifiEnlace` implementa la alternativa TCP bajo la misma interfaz `Enlace`.
-3. **Monitoreo y Control (Hito 3):** Mover el deslizador del sensor ultrasónico HC-SR04 en el Nodo por debajo de `100 cm` para disparar la notificación de intrusión en el Panel; luego presionar «Activar Sirena / Foco Disuasivo» desde el Panel para mostrar la notificación en el Nodo y la confirmación `ACK`.
-4. **Almacenamiento y Consulta (Hito 6):** Abrir «Ver historial de lecturas (SQLite)» en el Panel y mostrar la tabla `usuarios` y `lecturas` en *App Inspection → Database Inspector*.
-5. **Seguridad ISO/IEC 27400 y OT (Hito 7):** Cortar el enlace para demostrar el paso automático a **estado seguro** (`APAGADO`), probar la conexión con códigos distintos (`111111` vs `222222`) verificando que `AES-256-GCM` descarta los mensajes, e ingresar con un segundo usuario (`observador`) verificando que no puede accionar el actuador.
+
