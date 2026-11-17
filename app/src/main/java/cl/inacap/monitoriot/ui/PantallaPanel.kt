@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -18,6 +20,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import cl.inacap.monitoriot.Sesion
+import cl.inacap.monitoriot.enlace.EnlaceHttp
 import cl.inacap.monitoriot.enlace.Mensaje
 import kotlinx.coroutines.launch
 
@@ -32,12 +35,18 @@ fun PantallaPanel(modifier: Modifier, onHistorial: () -> Unit, onSalir: () -> Un
     val pir by Sesion.pirDetectado.collectAsState()
     val alarmaActiva by Sesion.alarmaActiva.collectAsState()
     val alcance = rememberCoroutineScope()
-    val puedeControlar = Sesion.rol == "operador" // control de acceso por rol (ISO/IEC 27400)
+    val puedeControlar = Sesion.rol == "operador" // control de acceso por rol (ISO 27000 / 27400)
+
+    val enlaceHttp = enlace as? EnlaceHttp
+    val ultimaRespuestaHttp by (enlaceHttp?.ultimaRespuestaHttp
+        ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
 
     val hayIntrusion = (dist != null && dist!! < Sesion.UMBRAL_DISTANCIA) || pir
 
     Column(
-        modifier = modifier.padding(24.dp),
+        modifier = modifier
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
@@ -87,7 +96,7 @@ fun PantallaPanel(modifier: Modifier, onHistorial: () -> Unit, onSalir: () -> Un
         )
 
         Button(
-            enabled = puedeControlar && estado == "Conectado",
+            enabled = puedeControlar && (estado == "Conectado" || enlaceHttp != null),
             onClick = {
                 alcance.launch {
                     enlace.enviar(
@@ -99,9 +108,9 @@ fun PantallaPanel(modifier: Modifier, onHistorial: () -> Unit, onSalir: () -> Un
         ) {
             Text(
                 if (alarmaActiva)
-                    "Desactivar Sirena / Foco (Desarmar)"
+                    "Desactivar Sirena / Foco (HMAC válido)"
                 else
-                    "Activar Sirena / Foco Disuasivo"
+                    "Activar Sirena / Foco Disuasivo (HMAC válido)"
             )
         }
 
@@ -111,6 +120,58 @@ fun PantallaPanel(modifier: Modifier, onHistorial: () -> Unit, onSalir: () -> Un
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        // Sección de pruebas de seguridad HMAC-SHA256 y Contador para Unidad 3 (ESP32 HTTP)
+        if (enlaceHttp != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Unidad 3 · Pruebas de Seguridad ESP32 (HMAC-SHA256)",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    ultimaRespuestaHttp?.let { resp ->
+                        Text(
+                            "Última respuesta ESP32: $resp",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (resp.startsWith("200"))
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.error
+                        )
+                    }
+                    OutlinedButton(
+                        enabled = puedeControlar,
+                        onClick = {
+                            alcance.launch {
+                                enlaceHttp.probarComandoFirmaAlterada("SIRENA_ON")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Probar comando con firma alterada (Esperado: 401)")
+                    }
+                    OutlinedButton(
+                        enabled = puedeControlar,
+                        onClick = {
+                            alcance.launch {
+                                enlaceHttp.probarComandoRepetido("SIRENA_ON")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Probar comando repetido / Replay (Esperado: 409)")
+                    }
+                }
+            }
         }
 
         OutlinedButton(

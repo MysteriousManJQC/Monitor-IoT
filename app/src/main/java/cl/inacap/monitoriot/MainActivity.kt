@@ -35,11 +35,24 @@ class MainActivity : ComponentActivity() {
         pedirPermisos.launch(permisosNecesarios())
         val db = BaseDatos(this)
 
+        // Si Hertzbench lanza la actividad con el extra "board_url" (eva6.yaml),
+        // inicia automáticamente el enlace HTTP firmado hacia el ESP32 emulado.
+        val boardUrlExtra = intent?.getStringExtra("board_url")
+        if (!boardUrlExtra.isNullOrBlank() && Sesion.enlace == null) {
+            Sesion.iniciarModoHertzbench(this, db, boardUrlExtra)
+        }
+
         setContent {
             MonitorIoTTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { relleno ->
                     var pantalla by rememberSaveable {
-                        mutableStateOf(if (Sesion.usuario == null) "login" else "conexion")
+                        mutableStateOf(
+                            when {
+                                !boardUrlExtra.isNullOrBlank() -> "panel"
+                                Sesion.usuario == null -> "login"
+                                else -> "conexion"
+                            }
+                        )
                     }
                     val m = Modifier.padding(relleno)
                     when (pantalla) {

@@ -41,6 +41,7 @@ import cl.inacap.monitoriot.Sesion
 import cl.inacap.monitoriot.datos.BaseDatos
 import cl.inacap.monitoriot.enlace.BluetoothEnlace
 import cl.inacap.monitoriot.enlace.Enlace
+import cl.inacap.monitoriot.enlace.EnlaceHttp
 import cl.inacap.monitoriot.enlace.WifiEnlace
 import cl.inacap.monitoriot.seguridad.Cripto
 import kotlinx.coroutines.Dispatchers
@@ -60,37 +61,50 @@ fun PantallaConexion(
         ctx.getSystemService(BluetoothManager::class.java)?.adapter
     }
     var esNodo by rememberSaveable { mutableStateOf(false) }
-    var usarBt by rememberSaveable { mutableStateOf(true) }
+    // Medio: "http_esp32" (Unidad 3 por defecto), "bt" (Bluetooth Unidad 2), "wifi_tcp" (Wi-Fi TCP Unidad 2)
+    var medio by rememberSaveable { mutableStateOf("http_esp32") }
+    var boardUrl by rememberSaveable { mutableStateOf(Sesion.boardUrl) }
     var codigo by rememberSaveable { mutableStateOf("123456") }
     var ip by rememberSaveable { mutableStateOf("") }
     var elegido by remember { mutableStateOf<BluetoothDevice?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val alcance = rememberCoroutineScope()
 
+    val usarBt = medio == "bt"
+    val usarHttpEsp32 = medio == "http_esp32"
+
     fun iniciar() {
         error = when {
-            codigo.length != 6 -> "El código de vinculación debe tener 6 dígitos."
+            usarHttpEsp32 && boardUrl.isBlank() -> "Escribe la URL HTTP del ESP32 (ej. http://192.168.4.11/)."
+            !usarHttpEsp32 && codigo.length != 6 -> "El código de vinculación debe tener 6 dígitos."
             usarBt && adaptador == null -> "Este teléfono no tiene Bluetooth."
             usarBt && !tienePermisoBt(ctx) -> "Falta el permiso de Bluetooth (Ajustes → Apps → MonitorIoT)."
             usarBt && adaptador?.isEnabled != true -> "Enciende el Bluetooth."
             usarBt && !esNodo && elegido == null -> "Elige el teléfono nodo."
-            !usarBt && !esNodo && ip.isBlank() -> "Escribe la IP del nodo."
+            medio == "wifi_tcp" && !esNodo && ip.isBlank() -> "Escribe la IP del nodo."
             else -> null
         }
         if (error != null) return
         alcance.launch {
-            val clave = withContext(Dispatchers.Default) { Cripto.claveDesdeCodigo(codigo) }
-            val enlace: Enlace = if (usarBt) {
-                BluetoothEnlace(adaptador!!, clave).also {
-                    if (esNodo) it.esperar() else it.conectar(elegido!!)
-                }
+            if (usarHttpEsp32) {
+                Sesion.boardUrl = EnlaceHttp.normalizarBaseUrl(boardUrl)
+                val enlace = EnlaceHttp(Sesion.boardUrl).also { it.iniciarMonitoreo() }
+                Sesion.iniciar(ctx, db, enlace, esNodo = false)
+                onListo("panel")
             } else {
-                WifiEnlace(clave).also {
-                    if (esNodo) it.esperar() else it.conectar(ip)
+                val clave = withContext(Dispatchers.Default) { Cripto.claveDesdeCodigo(codigo) }
+                val enlace: Enlace = if (usarBt) {
+                    BluetoothEnlace(adaptador!!, clave).also {
+                        if (esNodo) it.esperar() else it.conectar(elegido!!)
+                    }
+                } else {
+                    WifiEnlace(clave).also {
+                        if (esNodo) it.esperar() else it.conectar(ip)
+                    }
                 }
+                Sesion.iniciar(ctx, db, enlace, esNodo)
+                onListo(if (esNodo) "nodo" else "panel")
             }
-            Sesion.iniciar(ctx, db, enlace, esNodo)
-            onListo(if (esNodo) "nodo" else "panel")
         }
     }
 
@@ -110,86 +124,105 @@ fun PantallaConexion(
             color = MaterialTheme.colorScheme.primary
         )
 
-        Text("1. Rol de este teléfono:")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("1. Medio inalámbrico:")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = esNodo,
-                onClick = { esNodo = true; error = null },
-                label = { Text("Nodo IoT (Perímetro)") }
+                selected = usarHttpEsp32,
+                onClick = { medio = "http_esp32"; esNodo = false; error = null },
+                label = { Text("HTTP ESP32 (Wi-Fi HMAC · U3)") }
             )
-            FilterChip(
-                selected = !esNodo,
-                onClick = { esNodo = false; error = null },
-                label = { Text("Panel de Control") }
-            )
-        }
-
-        Text("2. Medio inalámbrico:")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = usarBt,
-                onClick = { usarBt = true; error = null },
-                label = { Text("Bluetooth Clásico") }
+                onClick = { medio = "bt"; error = null },
+                label = { Text("Bluetooth Clásico (U2)") }
             )
             FilterChip(
-                selected = !usarBt,
-                onClick = { usarBt = false; error = null },
-                label = { Text("Wi-Fi (TCP)") }
+                selected = medio == "wifi_tcp",
+                onClick = { medio = "wifi_tcp"; error = null },
+                label = { Text("Wi-Fi TCP (U2)") }
             )
         }
 
-        OutlinedTextField(
-            value = codigo,
-            onValueChange = { if (it.length <= 6) codigo = it.filter { c -> c.isDigit() } },
-            label = { Text("3. Código de vinculación AES-256 (6 dígitos)") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-        )
-
-        when {
-            usarBt && esNodo -> {
-                Text(
-                    "4. Este equipo esperará conexión Bluetooth RFCOMM cifrada.",
-                    style = MaterialTheme.typography.bodyMedium
+        if (usarHttpEsp32) {
+            Text(
+                "Unidad 3 (Hertzbench): El teléfono actúa como Panel de Control y se comunica por Wi-Fi HTTP con el WebServer (:80) del ESP32 firmando cada comando con HMAC-SHA256 y contador anti-repetición.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            OutlinedTextField(
+                value = boardUrl,
+                onValueChange = { boardUrl = it.trim() },
+                label = { Text("2. URL del ESP32 (board_url)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Text("2. Rol de este teléfono:")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = esNodo,
+                    onClick = { esNodo = true; error = null },
+                    label = { Text("Nodo IoT (Perímetro)") }
+                )
+                FilterChip(
+                    selected = !esNodo,
+                    onClick = { esNodo = false; error = null },
+                    label = { Text("Panel de Control") }
                 )
             }
-            usarBt && !esNodo -> {
-                Text("4. Elige el nodo (emparéjalo antes en Ajustes → Bluetooth):")
-                val emparejados = equiposEmparejados(ctx, adaptador)
-                if (emparejados.isEmpty()) {
+
+            OutlinedTextField(
+                value = codigo,
+                onValueChange = { if (it.length <= 6) codigo = it.filter { c -> c.isDigit() } },
+                label = { Text("3. Código de vinculación AES-256 (6 dígitos)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+            )
+
+            when {
+                usarBt && esNodo -> {
                     Text(
-                        "No hay equipos emparejados o falta permiso de dispositivos cercanos.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
+                        "4. Este equipo esperará conexión Bluetooth RFCOMM cifrada.",
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                } else {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        emparejados.forEach { d ->
-                            FilterChip(
-                                selected = elegido?.address == d.address,
-                                onClick = { elegido = d },
-                                label = { Text(nombre(d)) }
-                            )
+                }
+                usarBt && !esNodo -> {
+                    Text("4. Elige el nodo (emparéjalo antes en Ajustes → Bluetooth):")
+                    val emparejados = equiposEmparejados(ctx, adaptador)
+                    if (emparejados.isEmpty()) {
+                        Text(
+                            "No hay equipos emparejados o falta permiso de dispositivos cercanos.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            emparejados.forEach { d ->
+                                FilterChip(
+                                    selected = elegido?.address == d.address,
+                                    onClick = { elegido = d },
+                                    label = { Text(nombre(d)) }
+                                )
+                            }
                         }
                     }
                 }
-            }
-            !usarBt && esNodo -> {
-                Text(
-                    "4. IP de este teléfono: ${WifiEnlace.ipLocal() ?: "sin red"}. Escríbela en el panel (Puerto ${WifiEnlace.PUERTO})."
-                )
-            }
-            !usarBt && !esNodo -> {
-                OutlinedTextField(
-                    value = ip,
-                    onValueChange = { ip = it.trim() },
-                    label = { Text("4. IP del nodo (ej. 192.168.43.1)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
+                !usarBt && esNodo -> {
+                    Text(
+                        "4. IP de este teléfono: ${WifiEnlace.ipLocal() ?: "sin red"}. Escríbela en el panel (Puerto ${WifiEnlace.PUERTO})."
+                    )
+                }
+                !usarBt && !esNodo -> {
+                    OutlinedTextField(
+                        value = ip,
+                        onValueChange = { ip = it.trim() },
+                        label = { Text("4. IP del nodo (ej. 192.168.43.1)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    )
+                }
             }
         }
 
@@ -201,7 +234,13 @@ fun PantallaConexion(
             onClick = { iniciar() },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (esNodo) "Iniciar como Nodo Perimetral" else "Conectar desde Panel")
+            Text(
+                when {
+                    usarHttpEsp32 -> "Conectar al ESP32 (HTTP + HMAC)"
+                    esNodo -> "Iniciar como Nodo Perimetral"
+                    else -> "Conectar desde Panel"
+                }
+            )
         }
 
         OutlinedButton(

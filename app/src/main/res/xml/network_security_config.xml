@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Permite comunicación HTTP firmada con HMAC-SHA256 hacia el ESP32 en la red Wi-Fi local (Hertzbench / LAN) -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

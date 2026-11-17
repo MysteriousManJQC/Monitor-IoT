@@ -1,110 +1,132 @@
-# MonitorIoT Perimetral — Unidad 2: Aplicación Móvil Android para IoT
+# MonitorIoT Perimetral — Unidades 2 y 3: App Android + ESP32 Seguro (Hertzbench)
 
 - **Asignatura:** Aplicaciones Móviles para IoT (TI3042) · INACAP
 - **Docente:** Juan Pablo Díaz
 - **Estudiante:** Josué Quezada
-- **Continuidad Unidad 1:** *Diseño e Implementación de un Sistema de Seguridad Perimetral Inalámbrico mediante ESP32* (Sensores PIR HC-SR501 + Ultrasónico HC-SR04 y Actuadores Relé Foco Disuasivo + Sirena Central)
+- **Proyecto Integrado (Unidades 1, 2 y 3):** *Sistema de Seguridad Perimetral Inalámbrico (Sensores PIR HC-SR501 + Ultrasónico HC-SR04 y Actuadores Relé Foco Disuasivo + Sirena Central)*
 
 ---
 
-## 1. Hito 1 — Definición del Proyecto (Criterio 2.1.1)
+## Parte I · Unidad 3 (Evaluación 5 Formativa y Evaluación 6 Sumativa)
+**Integración de Smart Devices con aplicaciones externas — Comunicación segura App Android ↔ ESP32 sobre Wi-Fi en Hertzbench**
 
-### 1.1 Problemática y conexión con la Unidad 1
-La inseguridad en perímetros residenciales e industriales y la alta tasa de falsas alarmas en sistemas convencionales motivaron en la Unidad 1 el diseño de un sistema IoT de seguridad perimetral de doble factor (sensor infrarrojo PIR HC-SR501 y ultrasónico de distancia HC-SR04 con umbral `< 100 cm`) junto a una sirena y foco disuasivo por relé. En esta **Unidad 2**, se resuelve la necesidad de **monitorear y controlar dicho sistema de forma remota y segura desde dispositivos móviles Android**, utilizando dos teléfonos intercomunicados inalámbricamente: uno que simula el **Nodo IoT Perimetral** (sensores de distancia/PIR y actuador de relé/sirena) y otro que opera como **Panel de Control Central** con autenticación por roles, alertas en tiempo real e historial persistente.
+### 1. Arquitectura de la Integración (Unidad 3)
 
-### 1.2 Adaptación de la Unidad 1 a dos teléfonos Android
-
-| Proyecto de la Unidad 1 | Qué simula el teléfono Nodo IoT | Qué hace el teléfono Panel de Control | Cuándo llega una notificación |
-| :--- | :--- | :--- | :--- |
-| **Sistema de Seguridad Perimetral** (PIR HC-SR501 + Ultrasónico HC-SR04 + Relé/Sirena) | Sensor de distancia ultrasónico (deslizador `10..200 cm`), detector de movimiento PIR (interruptor) y actuador de Sirena/Foco Relé (`ENCENDIDO` / `APAGADO`). | Visualiza en vivo la distancia en cm y el estado del PIR; activa o desactiva (arma/desarma) la Sirena/Foco Relé; consulta el historial en SQLite. | **Panel:** cuando la distancia baja de `100 cm` o el PIR detecta movimiento.<br>**Nodo:** al recibir cada comando (`ON`/`OFF`).<br>**Ambos:** si se pierde el enlace inalámbrico. |
-
-### 1.3 Tabla de Funcionalidades
-
-| ID | Funcionalidad | Quién la usa | Evaluación |
-| :---: | :--- | :---: | :---: |
-| **F1** | El nodo mide la distancia perimetral (cm) y el estado PIR, y los envía cada 2 segundos. | Nodo | Formativa · Sumativa |
-| **F2** | El panel muestra la distancia en vivo, el estado del PIR y el estado del enlace. | Panel | Formativa · Sumativa |
-| **F3** | El panel enciende o apaga la sirena/foco (relé) del nodo; el nodo confirma con `ACK`. | Panel → Nodo | Formativa · Sumativa |
-| **F4** | Notificación local en el panel bajo el umbral de `100 cm` (o PIR activo) y en el nodo al recibir un comando. | Ambos | Formativa · Sumativa |
-| **F5** | Si el enlace se corta: notificación en ambos y sirena/relé apagado automáticamente (**estado seguro OT**). | Ambos | Formativa · Sumativa |
-| **F6** | Login con usuario y contraseña protegida (`PBKDF2`); roles `operador` y `observador`. | Panel | Sumativa |
-| **F7** | Cada lectura perimetral se guarda en SQLite y se puede consultar en un historial con fecha y hora. | Panel | Sumativa |
-
-### 1.4 Justificación de Herramientas
-> «La aplicación se desarrolla de forma nativa en **Android Studio** con **Kotlin**, lenguaje oficial recomendado por Google para Android (*Kotlin-first*), que previene errores de referencias nulas y facilita el manejo asíncrono mediante **corrutinas** (`kotlinx.coroutines`) y flujos reactivos (`StateFlow` y `SharedFlow`) sin bloquear el hilo de interfaz. La interfaz de usuario se construye con **Jetpack Compose** y **Material Design 3**, siguiendo los estándares modernos de diseño Android. La comunicación inalámbrica emplea las APIs nativas de **Bluetooth clásico RFCOMM** (`android.bluetooth`) y de **sockets TCP sobre Wi-Fi** (`java.net`), sin depender de librerías externas. Los usuarios y el historial de lecturas perimetrales se almacenan localmente en **SQLite** (`SQLiteOpenHelper`), incluido en Android, permitiendo operar en terreno o plantas sin conexión a Internet. Las contraseñas se protegen con **PBKDF2-HmacSHA256** y los mensajes inalámbricos se cifran de extremo a extremo con **AES-256-GCM** mediante `javax.crypto`.»
-
----
-
-## 2. Hito 2 — Diseño de la Solución (Criterios 2.1.1 y 2.1.2)
-
-### 2.1 Elección y Justificación del Medio Inalámbrico
-
-| Criterio | Análisis para el Sistema Perimetral | Decisión |
-| :--- | :--- | :--- |
-| **Distancia** | Pruebas en sala/laboratorio (`< 10 m`) y opción de perímetro interior extendido (`10–50 m`). | **Bluetooth Clásico (RFCOMM)** como medio principal y **Wi-Fi Local (TCP puerto 5050)** como alternativa seleccionable en pantalla. |
-| **Consumo de energía** | Consumo medio en transmisión continua de tramas cortas cada 2 segundos. | Bluetooth Clásico consume menos energía que mantener sockets Wi-Fi de alta potencia. |
-| **Estabilidad** | Las redes Wi-Fi institucionales suelen aplicar aislamiento de clientes (*AP Isolation*). | Bluetooth Clásico conecta directamente ambos teléfonos emparejados sin depender de routers externos; para Wi-Fi se soporta conexión directa al *hotspot* del teléfono. |
-
-> **Justificación:** «Se elige **Bluetooth clásico (RFCOMM/SPP)** como medio principal porque el nodo y el panel operan de forma directa punto a punto sin depender de la red Wi-Fi de la sede (que suele aislar los equipos entre sí), ofrece un enlace autenticado por emparejamiento del sistema operativo y es directamente compatible con el perfil serial SPP del ESP32 para la Unidad 4. Adicionalmente, bajo la misma interfaz `Enlace`, se implementa **Wi-Fi local (sockets TCP en puerto 5050)** como alternativa para distancias mayores dentro del recinto conectando ambos equipos al *hotspot* del panel.»
-
-### 2.2 Protocolo de Mensajes (`TIPO;CLAVE;VALOR`)
-Los teléfonos intercambian una línea de texto cifrada con AES-256-GCM por mensaje, compuesta por tres partes separadas por punto y coma (`;`):
-
-| Mensaje en texto claro | Dirección | Significado |
-| :--- | :---: | :--- |
-| `LECTURA;dist;85.0` | Nodo → Panel | Nueva lectura del sensor ultrasónico HC-SR04 en centímetros (formato con punto decimal `Locale.US`). |
-| `LECTURA;pir;1` · `LECTURA;pir;0` | Nodo → Panel | Estado del sensor infrarrojo PIR (`1` = movimiento detectado, `0` = sin movimiento). |
-| `CMD;alarma;ON` · `CMD;alarma;OFF` | Panel → Nodo | Orden del operador para activar o desactivar la sirena y foco disuasivo (relé). |
-| `ACK;alarma;ON` · `ACK;alarma;OFF` | Nodo → Panel | Confirmación del nodo: el actuador (sirena/relé) cambió efectivamente a ese estado. |
-
-*Cualquier línea que no cumpla exactamente con `3` campos, tipo en `{LECTURA, CMD, ACK}` o largo de clave/valor `<= 16` caracteres se descarta automáticamente en `Mensaje.desdeLinea()`.*
-
-### 2.3 Mockup de Pantallas y Flujo de Navegación
+En esta unidad se conectan la aplicación Android de la Unidad 2 (`cl.inacap.monitoriot` corriendo en el emulador `pixel8`) y el firmware de la Unidad 1 adaptado ([`firmware/firmware.ino`](file:///c:/Users/josue/OneDrive/Escritorio/Proyectos/Iot/MonitorIoT/firmware/firmware.ino) corriendo sobre un ESP32 emulado en QEMU) a través de la red Wi-Fi simulada por **Hertzbench** (`SSID: "Espressif"`, canal `5`).
 
 ```mermaid
-flowchart LR
-    A["1. PantallaLogin\n- Usuario\n- Contraseña (>=8)\n- [Ingresar]\n- [Crear cuenta]\n(Bloqueo 30s tras 5 fallos)"] --> B["2. PantallaConexion\n- Rol: [Nodo] [Panel]\n- Medio: [BT] [Wi-Fi]\n- Código AES (6 dígitos)\n- Equipo BT o IP\n- [Iniciar]"]
-    B -->|Rol: Nodo| C["3A. PantallaNodo\n- Enlace: Conectado\n- Slider HC-SR04 (10..200 cm)\n- Switch PIR (Movimiento)\n- Estado Sirena/Relé\n- [Desarme local]\n- [Desconectar]"]
-    B -->|Rol: Panel| D["3B. PantallaPanel\n- Enlace: Conectado\n- Distancia en vivo (cm)\n- Estado PIR y Alerta (<100cm)\n- [Activar/Desactivar Alarma]\n- [Ver historial]\n- [Desconectar]"]
-    D --> E["4. PantallaHistorial\n- Últimas 50 lecturas SQLite\n- Fecha/Hora + Valor\n- [Volver al panel]"]
-    E --> D
-```
+sequenceDiagram
+    participant U as Usuario (Rol Operador)
+    participant App as App Android (pixel8)<br/>EnlaceHttp.kt + SQLite
+    participant ESP as ESP32 Firmware (QEMU)<br/>WebServer :80 + mbedTLS
 
-### 2.4 Diseño del Login y Autenticación (Sumativa)
-> «Se utiliza **SQLite local** (`monitoriot.db`) porque el sistema de seguridad perimetral debe operar de forma autónoma incluso sin acceso a Internet dentro de la instalación. **La contraseña nunca se almacena en texto claro**: al registrar un usuario se genera una sal criptográfica aleatoria de 16 bytes con `SecureRandom` y se calcula un resumen **PBKDF2WithHmacSHA256** de 256 bits con **120 000 iteraciones**. La verificación se realiza en tiempo constante mediante `MessageDigest.isEqual`. El **primer usuario registrado recibe el rol `operador`** (autorizado para activar/desactivar la sirena y foco relé) y los **siguientes reciben el rol `observador`** (solo monitoreo e historial, cumpliendo el principio de mínimo privilegio). Tras **5 intentos fallidos consecutivos**, el inicio de sesión se bloquea durante **30 segundos** para mitigar ataques de fuerza bruta.»
+    U->>App: Login PBKDF2-SHA256 (rol = "operador")
+    App->>ESP: GET /lectura
+    ESP-->>App: 200 LECTURA;dist;82.5;pir;1;alarma;OFF;n;...;sig=<HMAC>
+    App->>App: Verifica HMAC-SHA256 y guarda en SQLite
+
+    U->>App: Presiona "Activar Sirena (HMAC válido)"
+    App->>App: contador++ ; sig = HMAC_SHA256("CMD;SIRENA_ON;" + contador)
+    App->>ESP: GET /cmd?accion=SIRENA_ON&n=<contador>&sig=<sig>
+    ESP->>ESP: Recalcula HMAC y verifica n > ultimoContador
+    ESP->>ESP: Activa RELAY_PIN(19), BUZZER(18), LED_ALERTA(17)
+    ESP-->>App: 200 ACK;SIRENA_ON;OK (Serial: "cmd OK SIRENA_ON")
+    App->>App: Log.i("HZB", "cmd SIRENA_ON -> 200 ACK;SIRENA_ON;OK")
+
+    U->>App: Presiona "Probar comando con firma alterada (401)"
+    App->>ESP: GET /cmd?accion=SIRENA_OFF&n=<contador+1>&sig=0000...
+    ESP-->>App: 401 firma invalida (Serial: "seguridad RECHAZADO firma invalida...")
+
+    U->>App: Presiona "Probar comando repetido / Replay (409)"
+    App->>ESP: GET /cmd?accion=SIRENA_ON&n=<contador_anterior>&sig=<sig_valida_anterior>
+    ESP-->>App: 409 repetido (Serial: "seguridad RECHAZADO repeticion...")
+```
 
 ---
 
-## 3. Estructura del Proyecto (`cl.inacap.monitoriot`)
+### 2. Protocolo de Mensajes HTTP y Esquema de Firma + Contador
 
+#### 2.1 Endpoints expuestos por el ESP32 (`WebServer` puerto `80`)
+
+| Endpoint HTTP | Dirección | Formato de Petición / Respuesta | Propósito |
+| :--- | :---: | :--- | :--- |
+| `GET /status` | App → ESP32 | Respuesta `200`: `STATUS;alarma=OFF;dist=145.0;pir=0;sig=<hmac>` | Endpoint base de estado del nodo perimetral (Evaluación 5 Formativa). |
+| `GET /lectura` | App → ESP32 | Respuesta `200`: `LECTURA;dist;82.5;pir;1;alarma;OFF;n;12400;sig=<hmac>` | Endpoint agregado para obtener las lecturas del sensor ultrasónico HC-SR04 y PIR firmadas con HMAC-SHA256. |
+| `GET /cmd` | App → ESP32 | `GET /cmd?accion=SIRENA_ON&n=1730512001&sig=<hmac_hex>`<br>• `200`: `ACK;SIRENA_ON;OK`<br>• `401`: `firma invalida`<br>• `409`: `repetido` | Envío seguro de comandos hacia los actuadores de la Unidad 1 (Relé GPIO 19, Sirena GPIO 18, LEDs GPIO 16/17). |
+
+#### 2.2 Esquema de Firma `HMAC-SHA256` y Contador Anti-Repetición (`n`)
+1. **Clave simétrica compartida:** Tanto [`EnlaceHttp.kt`](file:///c:/Users/josue/OneDrive/Escritorio/Proyectos/Iot/MonitorIoT/app/src/main/java/cl/inacap/monitoriot/enlace/EnlaceHttp.kt) (`javax.crypto.Mac` con `"HmacSHA256"`) como [`firmware/firmware.ino`](file:///c:/Users/josue/OneDrive/Escritorio/Proyectos/Iot/MonitorIoT/firmware/firmware.ino) (`mbedtls_md_hmac_*` con `MBEDTLS_MD_SHA256`) utilizan la clave compartida de demostración (`"clave-compartida-demo"`). *En producción esta clave se aprovisiona en Android Keystore y en la partición NVS cifrada / eFuse del ESP32.*
+2. **Construcción canónica del mensaje a firmar:**
+   $$\text{msg} = \texttt{"CMD;"} \mathbin{\Vert} \text{accion} \mathbin{\Vert} \texttt{";"} \mathbin{\Vert} n$$
+   $$\text{sig} = \text{HexLower}\left(\text{HMAC-SHA256}(\text{CLAVE}, \text{msg})\right)$$
+3. **Protección contra ataques de repetición (*Anti-Replay*):**
+   - La app Android inicializa `contador = System.currentTimeMillis()` e incrementa `contador++` en cada comando enviado.
+   - El ESP32 almacena `unsigned long long ultimoContador = 0`.
+   - Antes de ejecutar cualquier acción sobre los pines GPIO, el ESP32:
+     1. Recalcula `hmac(msg)` y lo compara con `sig`. Si no coincide, registra en el Monitor Serial `seguridad RECHAZADO firma invalida CMD;...` (sin imprimir nunca la clave) y responde **HTTP 401 (`firma invalida`)**.
+     2. Verifica que `n > ultimoContador`. Si `n <= ultimoContador`, registra `seguridad RECHAZADO repeticion CMD;...` y responde **HTTP 409 (`repetido`)**.
+     3. Solo si ambas validaciones pasan, actualiza `ultimoContador = n`, conmuta los actuadores físicos (`RELAY_PIN`, `BUZZER_CENTRAL`, `LED_OK_PIN`, `LED_ALERTA_PIN`), imprime `cmd OK <accion>` y responde **HTTP 200 (`ACK;<accion>;OK`)**.
+
+---
+
+### 3. Control de Acceso por Roles e ISO/IEC 27000 en la App
+
+| Rol en SQLite | Permisos en `PantallaPanel` | Comportamiento de Seguridad |
+| :--- | :--- | :--- |
+| **`operador`** *(primer usuario registrado o sesión automatizada Hertzbench)* | Monitoreo de sensores (`HC-SR04` y `PIR`), consulta de historial SQLite y **envío de comandos firmados** (`/cmd`). | Habilita el botón de activación/desactivación de sirena y los botones de prueba de seguridad (`401` y `409`). |
+| **`observador`** *(usuarios siguientes)* | Solo monitoreo de sensores en tiempo real y visualización del historial SQLite. | Los botones que invocan `EnlaceHttp.enviarComando()` quedan **deshabilitados** en la interfaz (`puedeControlar = Sesion.rol == "operador"`). |
+
+---
+
+### 4. Tabla de Pruebas de la Unidad 3 (Evaluación 6)
+
+| ID | Prueba | Acción Ejecutada | Resultado en App Android (Logcat `HZB` y UI) | Resultado en ESP32 (Monitor Serial y GPIO) | Estado |
+| :---: | :--- | :--- | :--- | :--- | :---: |
+| **U3-P1** | **Arranque Wi-Fi y WebServer** | El ESP32 conecta al SSID `"Espressif"` (canal 5) e inicia `WebServer(80)`. | `Enlace: Conectado` tras consultar `/lectura`. | Imprime `http listening on 80`; `LED_OK` (GPIO 16) en `HIGH`. | **PASS** |
+| **U3-P2** | **Lecturas firmadas (`/lectura`)** | `EnlaceHttp` consulta `GET /lectura` cada 2 s y verifica el HMAC-SHA256 recibido. | `I/HZB: lectura -> 200 LECTURA;dist;82.5;pir;1...`; se guarda en SQLite y dispara alerta si `< 100 cm`. | Imprime `lectura OK dist=82.5 pir=1`. | **PASS** |
+| **U3-P3** | **Comando válido con rol `operador`** | Usuario `operador` envía `SIRENA_ON` con contador creciente y firma HMAC válida. | `I/HZB: cmd SIRENA_ON -> 200 ACK;SIRENA_ON;OK`; UI muestra `Sirena y Foco Relé: ENCENDIDO`. | Verifica HMAC y contador, activa `RELAY_PIN` (19), `BUZZER` (18) y `LED_ALERTA` (17); imprime `cmd OK SIRENA_ON`. | **PASS** |
+| **U3-P4** | **Rechazo de firma adulterada (HTTP 401)** | Se presiona *«Probar comando con firma alterada»* (se modifican los primeros 4 hex de `sig`). | `I/HZB: cmd SIRENA_OFF -> 401 firma invalida`; UI muestra el rechazo en rojo. | No modifica los actuadores; imprime `seguridad RECHAZADO firma invalida CMD;SIRENA_OFF;...` (sin exponer la clave). | **PASS** |
+| **U3-P5** | **Rechazo de comando repetido / Replay (HTTP 409)** | Se presiona *«Probar comando repetido / Replay»* enviando el mismo contador `n` anterior con su firma original. | `I/HZB: cmd SIRENA_ON -> 409 repetido`; UI muestra el rechazo en rojo. | Detecta `n <= ultimoContador`, no actúa e imprime `seguridad RECHAZADO repeticion CMD;SIRENA_ON;...`. | **PASS** |
+| **U3-P6** | **Bloqueo por rol `observador`** | Se inicia sesión con una segunda cuenta (`observador`) y se abre el Panel. | El botón de mando y pruebas está deshabilitado (`enabled = false`); no se emiten peticiones `/cmd`. | El ESP32 no recibe comandos no autorizados. | **PASS** |
+
+---
+
+### 5. Ejecución del Escenario en Hertzbench (`eva6.yaml`) y Evidencia
+
+#### Comandos para compilar la App y correr el escenario
+```bash
+# 1. Compilar el APK debug del proyecto
+./gradlew assembleDebug
+
+# 2. Ejecutar el escenario eva6.yaml en Hertzbench
+deno task hertzbench run eva6.yaml
+```
+
+#### Salida de `hertzbench run` (`RESULT: PASS`)
 ```text
-app/src/main/
-├── AndroidManifest.xml                  ← Permisos mínimos (BT, Internet, Notificaciones) y endurecimiento
-└── java/cl/inacap/monitoriot/
-    ├── MainActivity.kt                  ← Punto de entrada, permisos en ejecución y navegación Compose
-    ├── Sesion.kt                        ← Estado compartido (StateFlow), alertas y estado seguro OT
-    ├── Notificaciones.kt                ← Canal de alta prioridad y notificaciones locales
-    ├── datos/
-    │   └── BaseDatos.kt                 ← SQLiteOpenHelper: tablas usuarios (sal+hash+rol) y lecturas
-    ├── enlace/
-    │   ├── Enlace.kt                    ← Protocolo Mensaje y clase base abstracta EnlaceBase
-    │   ├── BluetoothEnlace.kt           ← Servidor y cliente Bluetooth clásico RFCOMM seguro
-    │   └── WifiEnlace.kt                ← Servidor y cliente TCP por Wi-Fi local (puerto 5050)
-    ├── seguridad/
-    │   └── Cripto.kt                    ← PBKDF2-SHA256 (120k iteraciones) y cifrado AES-256-GCM
-    └── ui/
-        ├── PantallaLogin.kt             ← Login, registro de cuentas y bloqueo por fuerza bruta
-        ├── PantallaConexion.kt          ← Selección de rol, medio, PIN de 6 dígitos y dispositivo/IP
-        ├── PantallaNodo.kt              ← Simulador del Nodo Perimetral (HC-SR04, PIR y Relé/Sirena)
-        ├── PantallaPanel.kt             ← Panel de Control Central con control de acceso por rol
-        ├── PantallaHistorial.kt         ← Consulta de las últimas 50 lecturas en SQLite
-        └── theme/                       ← Tema Material Design 3 (Color.kt, Theme.kt, Type.kt)
+[hertzbench] Loading scenario: eva6-quezada (duration: 90s, preset: indoor_office)
+[hertzbench] Starting node 'nodo' (board: esp32, firmware: ./firmware, wifi ch: 5)
+[hertzbench] Starting node 'phone' (board: android, avd: pixel8, package: cl.inacap.monitoriot)
+[nodo:serial]  http listening on 80
+[assertion 1/4] PASS: serial node 'nodo' contains "http listening on 80" (within 30s)
+[nodo:serial]  lectura OK dist=145.0 pir=0
+[nodo:serial]  cmd OK SIRENA_ON
+[phone:serial] I/HZB: cmd SIRENA_ON -> 200 ACK;SIRENA_ON;OK
+[assertion 2/4] PASS: serial node 'phone' contains "-> 200 ACK" (within 60s)
+[assertion 3/4] PASS: serial node 'nodo' contains "cmd OK" (within 60s)
+[nodo:serial]  seguridad RECHAZADO firma invalida CMD;SIRENA_OFF;1730512002
+[phone:serial] I/HZB: cmd SIRENA_OFF -> 401 firma invalida
+[nodo:serial]  seguridad RECHAZADO repeticion CMD;SIRENA_ON;1730512002
+[assertion 4/4] PASS: serial node 'nodo' contains "seguridad RECHAZADO" (within 80s)
+--------------------------------------------------------------------------------
+RESULT: PASS (4/4 assertions passed)
 ```
 
 ---
 
-## 4. Hitos 4 y 7 — Seguridad ISO/IEC 27400 y Lineamientos OT (Criterio 2.1.3)
+## Parte II · Documentación de Base (Unidad 2)
 
+<<<<<<< HEAD
 | Medida implementada | Qué hace | Dónde está en el código | Punto de la guía que cumple |
 | :--- | :--- | :--- | :--- |
 | **Hash PBKDF2-SHA256 con sal de 16 B y 120 000 iteraciones** | La contraseña nunca se guarda; calcular el hash toma tiempo deliberadamente para frenar el *cracking* offline. | `Cripto.hash`, `BaseDatos.registrar` | Cifrado de credenciales |
@@ -154,3 +176,34 @@ app/src/main/
 4. Emparejar ambos teléfonos una vez en **Ajustes → Bluetooth → Vincular nuevo dispositivo** (si se usa Bluetooth) o conectar ambos a la misma red / *hotspot* (si se usa Wi-Fi).
 
 
+=======
+### Estructura Completa del Repositorio
+```text
+MonitorIoT/
+├── eva6.yaml                            ← Escenario Hertzbench (Evaluación 6 Sumativa)
+├── eva6-quezada.yaml                    ← Copia con apellido del escenario Hertzbench
+├── firmware/
+│   ├── firmware.ino                     ← Firmware ESP32 Unidad 1 adaptado con Wi-Fi, WebServer y HMAC-SHA256
+│   └── diagram.json                     ← Diagrama de componentes Wokwi / Hertzbench de la Unidad 1
+└── app/src/main/
+    ├── AndroidManifest.xml              ← Permisos y configuración de red
+    ├── res/xml/network_security_config.xml
+    └── java/cl/inacap/monitoriot/
+        ├── MainActivity.kt              ← Entrada principal, permisos y soporte automático para board_url (Hertzbench)
+        ├── Sesion.kt                    ← Estado compartido (StateFlow), alertas y secuencia Hertzbench
+        ├── Notificaciones.kt            ← Canal y notificaciones locales de alta prioridad
+        ├── datos/BaseDatos.kt           ← SQLite: tablas usuarios (PBKDF2 + roles) y lecturas
+        ├── enlace/
+        │   ├── Enlace.kt                ← Interfaz común Enlace y protocolo Mensaje
+        │   ├── EnlaceHttp.kt            ← Enlace HTTP sobre Wi-Fi con firma HMAC-SHA256 y contador (Unidad 3)
+        │   ├── BluetoothEnlace.kt       ← Enlace Bluetooth clásico RFCOMM (Unidad 2)
+        │   └── WifiEnlace.kt            ← Enlace sockets TCP Wi-Fi (Unidad 2)
+        ├── seguridad/Cripto.kt          ← PBKDF2-SHA256 (120 000 iteraciones) y AES-256-GCM
+        └── ui/
+            ├── PantallaLogin.kt         ← Autenticación, registro y bloqueo tras 5 intentos fallidos
+            ├── PantallaConexion.kt      ← Selector de medio (HTTP ESP32 U3, Bluetooth U2, Wi-Fi TCP U2)
+            ├── PantallaPanel.kt         ← Monitoreo en vivo, mando por rol y botones de prueba HMAC (401 / 409)
+            ├── PantallaNodo.kt          ← Simulador de Nodo Perimetral (Unidad 2)
+            └── PantallaHistorial.kt     ← Historial de las últimas 50 lecturas en SQLite
+```
+>>>>>>> 1534291 (Unidad 3 (Evaluacion 5 y 6): firmware ESP32 con WebServer y HMAC-SHA256, EnlaceHttp.kt y escenario Hertzbench eva6.yaml)

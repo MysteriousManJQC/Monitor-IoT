@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "Josue Quezada - Sistema Seguridad Perimetral IoT (Unidades 1-3)",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp_nodo", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-pir-motion-sensor", "id": "pir1", "top": -220, "left": -180, "attrs": {} },
+    { "type": "wokwi-hc-sr04", "id": "ultrasonic1", "top": -60, "left": -210, "attrs": {} },
+    { "type": "wokwi-relay-module", "id": "relay1", "top": -80, "left": 200, "attrs": {} },
+    { "type": "wokwi-buzzer", "id": "bz_central", "top": 120, "left": 200, "attrs": { "volume": "0.5" } },
+    { "type": "wokwi-pushbutton", "id": "btn_desarme", "top": 220, "left": 200, "attrs": { "color": "green" } },
+    { "type": "wokwi-led", "id": "led_ok", "top": -220, "left": 200, "attrs": { "color": "green" } },
+    { "type": "wokwi-led", "id": "led_alerta", "top": -160, "left": 200, "attrs": { "color": "red" } }
+  ],
+  "connections": [
+    [ "pir1:VCC", "esp_nodo:5V", "red", [] ],
+    [ "pir1:GND", "esp_nodo:GND.1", "black", [] ],
+    [ "pir1:OUT", "esp_nodo:13", "green", [] ],
+    [ "ultrasonic1:VCC", "esp_nodo:5V", "red", [] ],
+    [ "ultrasonic1:GND", "esp_nodo:GND.1", "black", [] ],
+    [ "ultrasonic1:TRIG", "esp_nodo:12", "blue", [] ],
+    [ "ultrasonic1:ECHO", "esp_nodo:14", "orange", [] ],
+    [ "relay1:VCC", "esp_nodo:5V", "red", [] ],
+    [ "relay1:GND", "esp_nodo:GND.1", "black", [] ],
+    [ "relay1:IN", "esp_nodo:19", "purple", [] ],
+    [ "bz_central:1", "esp_nodo:18", "orange", [] ],
+    [ "bz_central:2", "esp_nodo:GND.1", "black", [] ],
+    [ "btn_desarme:1.L", "esp_nodo:4", "green", [] ],
+    [ "btn_desarme:2.L", "esp_nodo:GND.1", "black", [] ],
+    [ "led_ok:A", "esp_nodo:16", "green", [] ],
+    [ "led_ok:C", "esp_nodo:GND.1", "black", [] ],
+    [ "led_alerta:A", "esp_nodo:17", "red", [] ],
+    [ "led_alerta:C", "esp_nodo:GND.1", "black", [] ]
+  ]
+}

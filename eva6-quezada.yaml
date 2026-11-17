@@ -1,0 +1,25 @@
+name: eva6-quezada
+seed: 1
+duration: 90s
+environment: { preset: indoor_office }
+nodes:
+  - id: nodo
+    board: esp32
+    firmware: ./firmware          # carpeta con el .ino de la Unidad 1 adaptado con WebServer y HMAC-SHA256
+    position: [0, 0]
+    radios: [{ phy: wifi, channel: 5 }]
+  - id: phone
+    board: android
+    position: [6, 0]
+    radios: [{ phy: wifi, channel: 5 }]
+    android:
+      avd: pixel8
+      apk: ./app/build/outputs/apk/debug/app-debug.apk
+      package: cl.inacap.monitoriot
+      activity: .MainActivity
+      extras: { board_url: "http://192.168.4.11/" }
+assertions:
+  - serial: { node: nodo, contains: "http listening on 80", within: 30s }
+  - serial: { node: phone, contains: "-> 200 ACK", within: 60s }
+  - serial: { node: nodo, contains: "cmd OK", within: 60s }
+  - serial: { node: nodo, contains: "seguridad RECHAZADO", within: 80s }
