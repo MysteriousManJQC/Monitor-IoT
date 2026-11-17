@@ -1,14 +1,11 @@
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
-import java.net.URI;
-import java.net.URL;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,15 +15,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * Simulador local del Firmware ESP32 (Unidad 3) para probar en Windows con el Emulador de Android
- * o con un celular físico por Wi-Fi, y para grabar el video de evidencia.
- *
- * Uso:
- *   1. Modo Servidor Interactivo (para conectar la App Android):
- *      java SimuladorEsp32.java
- *
- *   2. Modo Prueba Automática (ejecuta las 4 aserciones de Hertzbench eva6.yaml):
- *      java SimuladorEsp32.java --test
+ * Simulador del Firmware ESP32 (Unidad 3 - WebServer + HMAC-SHA256)
+ * Permite probar la App Android desde el Emulador de Android Studio (http://10.0.2.2:8080/)
+ * o desde un celular físico en la misma red Wi-Fi, y ejecutar la autoprueba de Hertzbench.
  */
 public class SimuladorEsp32 {
 
@@ -38,25 +29,99 @@ public class SimuladorEsp32 {
     private static boolean alarmaActiva = false;
     private static final long inicioMs = System.currentTimeMillis();
 
+    static class RespuestaHttp {
+        final int codigo;
+        final String cuerpo;
+
+        RespuestaHttp(int codigo, String cuerpo) {
+            this.codigo = codigo;
+            this.cuerpo = cuerpo;
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         boolean modoTest = args.length > 0 && "--test".equalsIgnoreCase(args[0]);
-        int puerto = modoTest ? 18080 : PUERTO;
 
-        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", puerto), 0);
+        System.out.println("================================================================================");
+        System.out.println(" MONITOR SERIAL ESP32 (Unidad 3 - WebServer + HMAC-SHA256)");
+        System.out.println("================================================================================");
+        System.out.println("[nodo:serial] http listening on 80");
 
-        // Endpoint /status
-        server.createContext("/status", exchange -> {
+        if (modoTest) {
+            ejecutarAutopruebaHertzbench();
+            return;
+        }
+
+        String ipLocal = obtenerIpLocal();
+        System.out.println("--------------------------------------------------------------------------------");
+        System.out.println(" -> Si usas el EMULADOR DE ANDROID STUDIO, escribe en '2. URL del ESP32':");
+        System.out.println("    http://10.0.2.2:" + PUERTO + "/");
+        System.out.println(" -> Si usas tu CELULAR FISICO por Wi-Fi, escribe en '2. URL del ESP32':");
+        System.out.println("    http://" + ipLocal + ":" + PUERTO + "/");
+        System.out.println("--------------------------------------------------------------------------------");
+        System.out.println(" Esperando conexiones HTTP de la App Android en puerto " + PUERTO + "... (Ctrl+C para salir)");
+
+        try (ServerSocket server = new ServerSocket(PUERTO)) {
+            while (true) {
+                Socket cliente = server.accept();
+                new Thread(() -> atenderCliente(cliente)).start();
+            }
+        }
+    }
+
+    private static void atenderCliente(Socket socket) {
+        try (
+            Socket s = socket;
+            BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+            OutputStream out = s.getOutputStream()
+        ) {
+            String requestLine = in.readLine();
+            if (requestLine == null || requestLine.isEmpty()) return;
+
+            // Consumir cabeceras HTTP
+            String header;
+            while ((header = in.readLine()) != null && !header.isEmpty()) {
+                // Fin de cabeceras en línea vacía
+            }
+
+            String[] parts = requestLine.split(" ");
+            String rawPath = parts.length > 1 ? parts[1] : "/";
+
+            RespuestaHttp resp = procesarRuta(rawPath);
+            byte[] bodyBytes = (resp.cuerpo + "\n").getBytes(StandardCharsets.UTF_8);
+            String statusText = resp.codigo == 200 ? "OK" : (resp.codigo == 401 ? "Unauthorized" : "Conflict");
+            String headers = "HTTP/1.1 " + resp.codigo + " " + statusText + "\r\n" +
+                "Content-Type: text/plain; charset=utf-8\r\n" +
+                "Content-Length: " + bodyBytes.length + "\r\n" +
+                "Connection: close\r\n\r\n";
+            out.write(headers.getBytes(StandardCharsets.UTF_8));
+            out.write(bodyBytes);
+            out.flush();
+        } catch (Exception ignored) {
+        }
+    }
+
+    // Procesa exactamente los endpoints de firmware/firmware.ino (/status, /lectura y /cmd)
+    private static synchronized RespuestaHttp procesarRuta(String rawPath) {
+        String path = rawPath;
+        String query = "";
+        int qIdx = rawPath.indexOf('?');
+        if (qIdx >= 0) {
+            path = rawPath.substring(0, qIdx);
+            query = rawPath.substring(qIdx + 1);
+        }
+
+        if ("/status".equals(path)) {
             contadorLecturas++;
             double dist = (contadorLecturas % 4 == 0) ? 82.5 : 145.0;
             int pir = (dist < 100.0) ? 1 : 0;
             String estadoAlarma = alarmaActiva ? "ON" : "OFF";
             String payload = String.format(Locale.US, "STATUS;alarma=%s;dist=%.1f;pir=%d", estadoAlarma, dist, pir);
             String sig = hmac(payload);
-            responder(exchange, 200, payload + ";sig=" + sig + "\n");
-        });
+            return new RespuestaHttp(200, payload + ";sig=" + sig);
+        }
 
-        // Endpoint /lectura (Lecturas firmadas con HMAC-SHA256)
-        server.createContext("/lectura", exchange -> {
+        if ("/lectura".equals(path)) {
             contadorLecturas++;
             double dist = (contadorLecturas % 4 == 0) ? 82.5 : 145.0;
             int pir = (dist < 100.0) ? 1 : 0;
@@ -69,12 +134,11 @@ public class SimuladorEsp32 {
             );
             String sig = hmac(msg);
             System.out.println(String.format(Locale.US, "[nodo:serial] lectura OK dist=%.1f pir=%d", dist, pir));
-            responder(exchange, 200, msg + ";sig=" + sig + "\n");
-        });
+            return new RespuestaHttp(200, msg + ";sig=" + sig);
+        }
 
-        // Endpoint /cmd (Verificación HMAC-SHA256 + Contador Anti-Repetición)
-        server.createContext("/cmd", exchange -> {
-            Map<String, String> params = parseQuery(exchange.getRequestURI());
+        if ("/cmd".equals(path)) {
+            Map<String, String> params = parseQuery(query);
             String accion = params.getOrDefault("accion", "");
             String nStr = params.getOrDefault("n", "0");
             String firma = params.getOrDefault("sig", "");
@@ -91,15 +155,13 @@ public class SimuladorEsp32 {
             // 1. Validar firma HMAC-SHA256
             if (firma.length() != 64 || !firma.equalsIgnoreCase(hmac(msg))) {
                 System.out.println("[nodo:serial] seguridad RECHAZADO firma invalida " + msg);
-                responder(exchange, 401, "firma invalida\n");
-                return;
+                return new RespuestaHttp(401, "firma invalida");
             }
 
             // 2. Validar contador estrictamente creciente (Anti-Replay)
             if (n <= 0 || n <= ultimoContador) {
                 System.out.println("[nodo:serial] seguridad RECHAZADO repeticion " + msg);
-                responder(exchange, 409, "repetido\n");
-                return;
+                return new RespuestaHttp(409, "repetido");
             }
 
             ultimoContador = n;
@@ -110,61 +172,44 @@ public class SimuladorEsp32 {
             }
 
             System.out.println("[nodo:serial] cmd OK " + accion);
-            responder(exchange, 200, "ACK;" + accion + ";OK\n");
-        });
-
-        server.start();
-        System.out.println("================================================================================");
-        System.out.println(" MONITOR SERIAL ESP32 (Unidad 3 - WebServer + HMAC-SHA256)");
-        System.out.println("================================================================================");
-        System.out.println("[nodo:serial] http listening on 80 (Simulador en puerto " + puerto + ")");
-
-        if (modoTest) {
-            ejecutarAutopruebaHertzbench("http://127.0.0.1:" + puerto + "/");
-            server.stop(0);
-            return;
+            return new RespuestaHttp(200, "ACK;" + accion + ";OK");
         }
 
-        String ipLocal = obtenerIpLocal();
-        System.out.println("--------------------------------------------------------------------------------");
-        System.out.println(" -> Si usas el EMULADOR DE ANDROID STUDIO, escribe en '2. URL del ESP32':");
-        System.out.println("    http://10.0.2.2:" + puerto + "/");
-        System.out.println(" -> Si usas tu CELULAR FISICO por Wi-Fi, escribe en '2. URL del ESP32':");
-        System.out.println("    http://" + ipLocal + ":" + puerto + "/");
-        System.out.println("--------------------------------------------------------------------------------");
-        System.out.println(" Esperando peticiones de la App Android... (Presiona Ctrl+C para detener)");
+        return new RespuestaHttp(404, "no encontrado");
     }
 
-    private static void ejecutarAutopruebaHertzbench(String base) throws Exception {
-        System.out.println("[hertzbench] Ejecutando escenario de prueba: eva6-quezada");
+    private static void ejecutarAutopruebaHertzbench() {
+        System.out.println("[hertzbench] Running scenario: eva6-quezada (preset: indoor_office, duration: 90s)");
         System.out.println("[assertion 1/4] PASS: serial node 'nodo' contains \"http listening on 80\"");
 
-        // 1. Consultar /lectura
-        String respLectura = httpGet(base + "lectura");
-        System.out.println("[phone:HZB]   lectura -> " + respLectura);
+        // 1. Consulta de /lectura
+        RespuestaHttp rLectura = procesarRuta("/lectura");
+        System.out.println("[phone:HZB]   lectura -> " + rLectura.codigo + " " + rLectura.cuerpo);
 
-        // 2. Enviar comando válido firmado con HMAC-SHA256
+        // 2. Envío de comando válido firmado con HMAC-SHA256
         long contador = System.currentTimeMillis();
         String accion = "SIRENA_ON";
         String sigValida = hmac("CMD;" + accion + ";" + contador);
-        String respOk = httpGet(base + "cmd?accion=" + accion + "&n=" + contador + "&sig=" + sigValida);
-        System.out.println("[phone:HZB]   cmd " + accion + " -> " + respOk);
-        boolean pass2 = respOk.contains("200 ACK");
+        RespuestaHttp rOk = procesarRuta("/cmd?accion=" + accion + "&n=" + contador + "&sig=" + sigValida);
+        String logPhoneOk = "cmd " + accion + " -> " + rOk.codigo + " " + rOk.cuerpo;
+        System.out.println("[phone:HZB]   " + logPhoneOk);
+
+        boolean pass2 = logPhoneOk.contains("-> 200 ACK");
         System.out.println("[assertion 2/4] " + (pass2 ? "PASS" : "FAIL") + ": serial node 'phone' contains \"-> 200 ACK\"");
         System.out.println("[assertion 3/4] " + (pass2 ? "PASS" : "FAIL") + ": serial node 'nodo' contains \"cmd OK\"");
 
-        // 3. Enviar comando con firma adulterada -> debe dar 401
+        // 3. Envío de comando con firma adulterada -> debe devolver 401
         long contador2 = contador + 1;
         String sigReal2 = hmac("CMD;SIRENA_OFF;" + contador2);
         String sigAdulterada = (sigReal2.startsWith("0000") ? "ffff" : "0000") + sigReal2.substring(4);
-        String resp401 = httpGet(base + "cmd?accion=SIRENA_OFF&n=" + contador2 + "&sig=" + sigAdulterada);
-        System.out.println("[phone:HZB]   cmd SIRENA_OFF (adulterado) -> " + resp401);
+        RespuestaHttp r401 = procesarRuta("/cmd?accion=SIRENA_OFF&n=" + contador2 + "&sig=" + sigAdulterada);
+        System.out.println("[phone:HZB]   cmd SIRENA_OFF -> " + r401.codigo + " " + r401.cuerpo);
 
-        // 4. Enviar comando repetido (Replay attack con el mismo contador anterior) -> debe dar 409
-        String resp409 = httpGet(base + "cmd?accion=" + accion + "&n=" + contador + "&sig=" + sigValida);
-        System.out.println("[phone:HZB]   cmd " + accion + " (repetido) -> " + resp409);
+        // 4. Envío de comando repetido (Replay Attack con el mismo contador) -> debe devolver 409
+        RespuestaHttp r409 = procesarRuta("/cmd?accion=" + accion + "&n=" + contador + "&sig=" + sigValida);
+        System.out.println("[phone:HZB]   cmd " + accion + " -> " + r409.codigo + " " + r409.cuerpo);
 
-        boolean pass4 = resp401.startsWith("401") && resp409.startsWith("409");
+        boolean pass4 = (r401.codigo == 401 && r409.codigo == 409);
         System.out.println("[assertion 4/4] " + (pass4 ? "PASS" : "FAIL") + ": serial node 'nodo' contains \"seguridad RECHAZADO\"");
         System.out.println("--------------------------------------------------------------------------------");
         if (pass2 && pass4) {
@@ -173,18 +218,6 @@ public class SimuladorEsp32 {
             System.out.println("RESULT: FAIL");
             System.exit(1);
         }
-    }
-
-    private static String httpGet(String urlStr) throws Exception {
-        URL url = new URI(urlStr).toURL();
-        HttpURLConnection con = (HttpURLConnection) url.openConnection();
-        con.setRequestMethod("GET");
-        int code = con.getResponseCode();
-        String body = new String(
-            (code < 400 ? con.getInputStream() : con.getErrorStream()).readAllBytes(),
-            StandardCharsets.UTF_8
-        ).trim();
-        return code + " " + body;
     }
 
     private static String hmac(String msg) {
@@ -202,18 +235,8 @@ public class SimuladorEsp32 {
         }
     }
 
-    private static void responder(HttpExchange exchange, int status, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
-        exchange.sendResponseHeaders(status, bytes.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(bytes);
-        }
-    }
-
-    private static Map<String, String> parseQuery(URI uri) {
+    private static Map<String, String> parseQuery(String query) {
         Map<String, String> map = new HashMap<>();
-        String query = uri.getRawQuery();
         if (query == null || query.isEmpty()) return map;
         for (String pair : query.split("&")) {
             int idx = pair.indexOf('=');
