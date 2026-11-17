@@ -17,29 +17,29 @@ En esta unidad se conectan la aplicación Android de la Unidad 2 (`cl.inacap.mon
 ```mermaid
 sequenceDiagram
     participant U as Usuario (Rol Operador)
-    participant App as App Android (pixel8)<br/>EnlaceHttp.kt + SQLite
-    participant ESP as ESP32 Firmware (QEMU)<br/>WebServer :80 + mbedTLS
+    participant App as App Android (pixel8) - EnlaceHttp.kt
+    participant ESP as ESP32 Firmware (QEMU) - WebServer 80
 
-    U->>App: Login PBKDF2-SHA256 (rol = "operador")
-    App->>ESP: GET /lectura
-    ESP-->>App: 200 LECTURA;dist;82.5;pir;1;alarma;OFF;n;...;sig=<HMAC>
+    U->>App: 1. Login PBKDF2-SHA256 (rol = operador)
+    App->>ESP: 2. GET /lectura
+    ESP-->>App: 200 OK - LECTURA dist=82.5 pir=1 sig=HMAC
     App->>App: Verifica HMAC-SHA256 y guarda en SQLite
 
-    U->>App: Presiona "Activar Sirena (HMAC válido)"
-    App->>App: contador++ ; sig = HMAC_SHA256("CMD;SIRENA_ON;" + contador)
-    App->>ESP: GET /cmd?accion=SIRENA_ON&n=<contador>&sig=<sig>
+    U->>App: 3. Presiona Activar Sirena (HMAC valido)
+    App->>App: Incrementa contador y calcula HMAC-SHA256
+    App->>ESP: GET /cmd?accion=SIRENA_ON&n=contador&sig=HMAC
     ESP->>ESP: Recalcula HMAC y verifica n > ultimoContador
     ESP->>ESP: Activa RELAY_PIN(19), BUZZER(18), LED_ALERTA(17)
-    ESP-->>App: 200 ACK;SIRENA_ON;OK (Serial: "cmd OK SIRENA_ON")
-    App->>App: Log.i("HZB", "cmd SIRENA_ON -> 200 ACK;SIRENA_ON;OK")
+    ESP-->>App: 200 OK - ACK SIRENA_ON OK (Serial: cmd OK SIRENA_ON)
+    App->>App: Logcat HZB: cmd SIRENA_ON -> 200 ACK
 
-    U->>App: Presiona "Probar comando con firma alterada (401)"
-    App->>ESP: GET /cmd?accion=SIRENA_OFF&n=<contador+1>&sig=0000...
-    ESP-->>App: 401 firma invalida (Serial: "seguridad RECHAZADO firma invalida...")
+    U->>App: 4. Presiona Probar comando con firma alterada (401)
+    App->>ESP: GET /cmd?accion=SIRENA_OFF&n=contador+1&sig=0000...
+    ESP-->>App: 401 Unauthorized - firma invalida (Serial: seguridad RECHAZADO)
 
-    U->>App: Presiona "Probar comando repetido / Replay (409)"
-    App->>ESP: GET /cmd?accion=SIRENA_ON&n=<contador_anterior>&sig=<sig_valida_anterior>
-    ESP-->>App: 409 repetido (Serial: "seguridad RECHAZADO repeticion...")
+    U->>App: 5. Presiona Probar comando repetido / Replay (409)
+    App->>ESP: GET /cmd?accion=SIRENA_ON&n=contador_anterior&sig=HMAC_anterior
+    ESP-->>App: 409 Conflict - repetido (Serial: seguridad RECHAZADO)
 ```
 
 ---
